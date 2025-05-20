@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NeoChat AI</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/atom-one-dark.min.css">
+    <style>
+        :root {
+            --primary: #7c4dff;
+            --secondary: #b388ff;
+            --bg-primary: #ffffff;
+            --bg-secondary: #f5f7fb;
+            --text-primary: #1a1a1a;
+            --text-secondary: #4a5568;
+        }
+
+        .dark {
+            --primary: #9d74ff;
+            --secondary: #b388ff;
+            --bg-primary: #1a1a1a;
+            --bg-secondary: #252525;
+            --text-primary: #f8fafc;
+            --text-secondary: #cbd5e1;
+        }
+
+        .message-user {
+            background: var(--primary);
+            color: white;
+        }
+
+        .message-ai {
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+        }
+
+        #messages::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        #messages::-webkit-scrollbar-track {
+            background: var(--bg-secondary);
+        }
+
+        #messages::-webkit-scrollbar-thumb {
+            background: var(--primary);
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body class="dark:bg-gray-900 h-screen">
+    <div class="flex h-full">
+        <!-- Sidebar -->
+        <div class="w-64 bg-gray-800 p-4 flex flex-col">
+            <div class="mb-6">
+                <button id="newChat" class="w-full bg-purple-600 hover:bg-purple-700 text-white p-2 rounded-lg flex items-center">
+                    <i class="fas fa-plus mr-2"></i> New Chat
+                </button>
+            </div>
+            <div class="flex-1 overflow-y-auto">
+                <h3 class="text-gray-400 text-sm mb-2">Chat History</h3>
+                <div id="chatHistory" class="space-y-2"></div>
+            </div>
+            <div class="border-t border-gray-700 pt-4">
+                <button id="toggleDark" class="w-full text-gray-300 hover:bg-gray-700 p-2 rounded-lg flex items-center">
+                    <i class="fas fa-moon mr-2"></i> Dark Mode
+                </button>
+                <button id="clearHistory" class="w-full text-gray-300 hover:bg-gray-700 p-2 rounded-lg flex items-center mt-2">
+                    <i class="fas fa-trash mr-2"></i> Clear History
+                </button>
+            </div>
+        </div>
+
+        <!-- Main Chat Area -->
+        <div class="flex-1 flex flex-col">
+            <!-- Messages Container -->
+            <div id="messages" class="flex-1 overflow-y-auto p-4 space-y-4"></div>
+
+            <!-- Input Area -->
+            <div class="border-t border-gray-200 dark:border-gray-700 p-4">
+                <div class="max-w-3xl mx-auto relative">
+                    <div id="typingIndicator" class="hidden absolute bottom-full mb-2 text-gray-500 text-sm">
+                        <div class="flex items-center space-x-2">
+                            <div class="dot-flashing"></div>
+                            <span>NeoChat is typing...</span>
+                        </div>
+                    </div>
+                    
+                    <div class="relative">
+                        <textarea 
+                            id="userInput" 
+                            rows="1"
+                            class="w-full p-3 pr-12 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 resize-none"
+                            placeholder="Type your message..."
+                        ></textarea>
+                        <button 
+                            id="sendButton" 
+                            class="absolute right-2 bottom-2 p-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg"
+                        >
+                            <i class="fas fa-paper-plane"></i>
+                        </button>
+                    </div>
+                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                        NeoChat may produce inaccurate information. Messages are stored locally.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/4.2.12/marked.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
+    <script>
+          class ChatApp {
+            constructor() {
+                this.chats = JSON.parse(localStorage.getItem('chats')) || [];
+                this.currentChatId = null;
+                this.isDarkMode = localStorage.getItem('darkMode') === 'true';
+                
+                this.initEventListeners();
+                this.toggleDarkMode(this.isDarkMode);
+                this.loadChatHistory();
+                
+                if(this.chats.length > 0) {
+                    this.loadChat(this.chats[0].id);
+                } else {
+                    this.createNewChat();
+                }
+            }
+
+            initEventListeners() {
+                document.getElementById('sendButton').addEventListener('click', () => this.sendMessage());
+                document.getElementById('userInput').addEventListener('keydown', (e) => {
+                    if(e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        this.sendMessage();
+                    }
+                });
+                document.getElementById('newChat').addEventListener('click', () => this.createNewChat());
+                document.getElementById('clearHistory').addEventListener('click', () => this.clearHistory());
+                document.getElementById('toggleDark').addEventListener('click', () => this.toggleDarkMode());
+            }
+
+            async sendMessage() {
+                const input = document.getElementById('userInput');
+                const message = input.value.trim();
+                if(!message) return;
+
+                input.value = '';
+                this.addMessage('user', message);
+                
+                try {
+                    this.showTypingIndicator();
+                    const response = await this.getAIResponse(message);
+                    this.addMessage('ai', response);
+                    this.saveChat();
+                } catch (error) {
+                    this.addMessage('ai', 'Sorry, there was an error processing your request.');
+                    console.error('Error:', error);
+                } finally {
+                    this.hideTypingIndicator();
+                }
+            }
+
+            async getAIResponse(message) {
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        message: message,
+                        session_id: this.currentChatId
+                    })
+                });
+
+                if (!response.ok) throw new Error('API request failed');
+                const data = await response.json();
+                return data.response;
+            }
+
+            addMessage(role, content) {
+                const chat = this.getCurrentChat();
+                chat.messages.push({ role, content, timestamp: new Date().toISOString() });
+                
+                const messagesDiv = document.getElementById('messages');
+                const messageDiv  = document.createElement('div');
+                messageDiv.className = `p-4 rounded-lg ${role === 'user' ? 'message-user ml-auto' : 'message-ai'} max-w-xl w-fit`;
+                messageDiv.innerHTML = marked.parse(content);
+                messagesDiv.appendChild(messageDiv);
+                
+                hljs.highlightAll();
+                messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            }
+
+            createNewChat() {
+                this.currentChatId = Date.now().toString();
+                const newChat = {
+                    id: this.currentChatId,
+                    title: 'New Chat',
+                    messages: []
+                };
+                this.chats.unshift(newChat);
+                this.saveChat();
+                this.loadChatHistory();
+                document.getElementById('messages').innerHTML = '';
+            }
+
+            loadChatHistory() {
+                const historyDiv = document.getElementById('chatHistory');
+                historyDiv.innerHTML = this.chats.map(chat => `
+                    <div class="p-2 cursor-pointer hover:bg-gray-700 rounded-lg text-white ${this.currentChatId === chat.id ? 'bg-gray-700' : ''}"
+                         onclick="chatApp.loadChat('${chat.id}')">
+                        ${chat.title}
+                    </div>
+                `).join('');
+            }
+
+            loadChat(id) {
+                this.currentChatId = id;
+                const chat = this.chats.find(c => c.id === id);
+                if (!chat) return;
+
+                const messagesDiv = document.getElementById('messages');
+                messagesDiv.innerHTML = chat.messages.map(msg => `
+                    <div class="p-4 rounded-lg ${msg.role === 'user' ? 'message-user ml-auto' : 'message-ai'} max-w-2xl">
+                        ${marked.parse(msg.content)}
+                    </div>
+                `).join('');
+                
+                hljs.highlightAll();
+                messagesDiv.scrollTop = messagesDiv.scrollHeight;
+                this.loadChatHistory();
+            }
+
+            saveChat() {
+                localStorage.setItem('chats', JSON.stringify(this.chats));
+                this.loadChatHistory();
+            }
+
+            clearHistory() {
+                if(confirm('Are you sure you want to clear all chat history?')) {
+                    localStorage.removeItem('chats');
+                    this.chats = [];
+                    this.createNewChat();
+                }
+            }
+
+            toggleDarkMode(force) {
+                this.isDarkMode = typeof force === 'boolean' ? force : !this.isDarkMode;
+                document.documentElement.classList.toggle('dark', this.isDarkMode);
+                localStorage.setItem('darkMode', this.isDarkMode);
+                
+                const toggleBtn = document.getElementById('toggleDark');
+                toggleBtn.innerHTML = this.isDarkMode 
+                    ? '<i class="fas fa-sun mr-2"></i> Light Mode' 
+                    : '<i class="fas fa-moon mr-2"></i> Dark Mode';
+            }
+
+            showTypingIndicator() {
+                document.getElementById('typingIndicator').classList.remove('hidden');
+            }
+
+            hideTypingIndicator() {
+                document.getElementById('typingIndicator').classList.add('hidden');
+            }
+
+            getCurrentChat() {
+                return this.chats.find(c => c.id === this.currentChatId);
+            }
+        }
+
+        // Initialize the chat app
+        const chatApp = new ChatApp();
+    </script>
+</body>
+</html>
